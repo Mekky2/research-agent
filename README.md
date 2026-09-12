@@ -99,3 +99,26 @@ The Supervisor sees the "Passed" flag. before finishing, it routes to the Memory
 ### Step 6: Graph Termination:
 
 The Supervisor evaluate the state one last time. Seeing that the research is done, verified, and saved, it's output the command "FINISH". LangGraph routes the workflow to the "END" node, effectively shutting down the loop and returning the final compiled response to you.
+
+
+## Folder Structure:
+
+```
+research-agent/
+├── .env                 # Environment variables (Ollama URL, model names)
+├── requirements.txt     # Python dependencies
+├── state.py             # The Graph State and Pydantic schemas 
+├── tools/
+│   ├── __init__.py
+│   ├── search.py        # Web search tool
+│   ├── scraper.py       # Wikipedia scraper tool
+│   └── file_ops.py      # File saving tools for the Memory agent
+├── agents/
+│   ├── __init__.py
+│   ├── supervisor.py    # The brain: routes tasks using structured output
+│   ├── researcher.py    # Worker: executes the search and scrape tools
+│   ├── verifier.py      # Worker: fact-checks the data
+│   └── memory.py        # Worker: saves the final report
+├── graph.py             # Wires the agents and state together into a LangGraph
+└── main.py              # The entry point to run your prompt
+```
