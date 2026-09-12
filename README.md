@@ -21,55 +21,81 @@ python3 engine.py
 
 System Architecture
 
-=====================================================================
-                      THE COGNITIVE LOOP
-=====================================================================
+                        [ User Request ]
+                              │
+                              ▼
+                 +--------------------------+
+                 |                          |
+                 |     Supervisor Agent     | 
+                 |  (Orchestrator/Router)   |
+                 |                          |
+                 +--------------------------+
+                   /          │           \
+                  /           │            \
+                 ▼            ▼             ▼
+       +------------+   +------------+   +------------+
+       |            |   |            |   |            |
+       | Researcher |   |  Verifier  |   |   Memory   |
+       |   Agent    |   |   Agent    |   |   Agent    |
+       |            |   |            |   |            |
+       +------------+   +------------+   +------------+
+         [Tools:]         [Tools:]         [Tools:]
+         - Search         - Evaluate       - Write File
+         - Scrape         - Cross-Check    - Log State
+                  \           │            /
+                   \          │           /
+                    ▼         ▼          ▼
+                 +--------------------------+
+                 |                          |
+                 |    Shared Graph State    |
+                 |   (Messages & Context)   |
+                 |                          |
+                 +--------------------------+
+                              │
+                              ▼
+                   [ Supervisor Decision ]
+                  (Route to Agent or FINISH)
+      
+## Execution Sequence
 
-  +-------------------------------------------------------------+
-  |                        ENGINE (main.py)                     |
-  |  Manages the while-loop and holds the current state.        |
-  +-----------------------------+-------------------------------+
-                                |
-                                | 1. Passes ResearchState
-                                v
-  +-------------------------------------------------------------+
-  |                     LLM MIDDLEWARE                          |
-  |  +-------------------------------------------------------+  |
-  |  | 2. Formats prompt & appends JSON schema               |  |
-  |  | 3. POST request to http://localhost:11434/api/chat  -----> [ OLLAMA SERVER ]
-  |  | 4. Receives raw string from Qwen-2.5-Coder:3b       <----- [ (Local CPU)   ]
-  |  | 5. Pydantic validates raw string into AgentAction     |  |
-  |  +-------------------------------------------------------+  |
-  +-----------------------------+-------------------------------+
-                                |
-                                | 6. Returns validated AgentAction
-                                v
-  +-------------------------------------------------------------+
-  |                      TOOL ROUTER                            |
-  |  Reads action.tool_name and executes the matching script.   |
-  +-----------------------------+-------------------------------+
-                                |
-           +--------------------+--------------------+
-           |                    |                    |
-           v                    v                    v
-  +-----------------+  +-----------------+  +-------------------+
-  |   search.py     |  |   scraper.py    |  | evaluate_findings |
-  | (DuckDuckGo API)|  | (BeautifulSoup) |  | (Checks goal)     |
-  +--------+--------+  +--------+--------+  +--------+----------+
-           |                    |                    |
-           +--------------------+--------------------+
-                                |
-                                | 7. Tool returns data (Facts, URLs)
-                                v
-  +-------------------------------------------------------------+
-  |                      STATE UPDATE                           |
-  |  Appends new facts to ResearchState.collected_facts.        |
-  |  Updates visited_urls and search_queries_run.               |
-  +-------------------------------------------------------------+
-                                |
-                                | 8. Loop repeats until complete
-                                \_________________________________ (Back to Top)
+To prevent the AI from confusing itself (hallucinations), LangGraph uses a strict turn-based system.
+Here is the sequence of events when you trigger a new research objective:
 
+### Step 1: State Initialization:
 
-                                # Autonomous Local AI Research Agent
+You submit a prompt, LangGraph initialize a **Shared Graph State** and appends your prompt to the message history.
 
+### Step 2: Supervisor Triage (The Guardrail):
+
+The Supervisor Agent wakes up and reads the state. Because we force a strict "with_structured_output" Pydantic guardrail, the LLM is physically forced to output a JSON object containing only 2 things:
+
+1. next_agent (Who to call)
+2. instruction (What they need to do)
+
+It recognizes it needs data, so it routes execution to the **Research Agent**.
+
+### Step 3: Execution & Middleware (Researcher Turn):
+
+Control shits to the Researcher Agent.
+
+- It receives the specific instructions from the Supervisor.
+- It uses the `execute_web_search` and `scrape_and_extract` tools.
+- Middleware kicks in here: if a tool fails (403 Forbidden error or timeout), your middleware catches it, intercept the error, and forces a retry or sanitizes the output before the LLM sees it.
+- Once the data is scraped, the Researcher writes its findings back to the *Shared Graph State* and returns control to the Supervisor.
+
+### Step 4: The Evaluation Check (Verifier Turn):
+
+The Supervisor activates again, sees the new data in the state, then decides it needs fact checking. It routes control to the Verifier Agent.
+
+- The Verifier runs in an isolated context (it doesn't care how hard the Researcher worked).
+- It cross-references the scraped data against your original objective.
+- If the data is garbage, the verifier writes "Failed: Missing NPU specs" to the state. The Supervisor would then route back to the Researcher to try again.
+- If the state is good, the Verifier writes "Passed" to the state and hands control back.
+
+### Step 5: Persistence (Memory Turn):
+
+The Supervisor sees the "Passed" flag. before finishing, it routes to the Memory Agent. The Memory Agent uses its file-writing tools to save the final report to your local disk and logs any specific constraints you mentioned for future runs. It updates the state and hands control back.
+
+### Step 6: Graph Termination:
+
+The Supervisor evaluate the state one last time. Seeing that the research is done, verified, and saved, it's output the command "FINISH". LangGraph routes the workflow to the "END" node, effectively shutting down the loop and returning the final compiled response to you.
