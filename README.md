@@ -17,7 +17,7 @@ A Python-based, locally hosted AI research agent that autonomously plans, search
 ## Usage
 ```bash
 python3 engine.py
-
+```
 
 System Architecture
 
