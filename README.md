@@ -1,12 +1,12 @@
 A Python-based, locally hosted AI research agent that autonomously plans, searches, scrapes, and synthesizes web data. 
 
-## Features
+## Features:
 - **Local AI Engine**: Powered by `qwen2.5-coder:3b` via Ollama for private, zero-cost reasoning.
 - **Autonomous Web Research**: Connects to the Wikipedia REST API with compliant bot headers to bypass 403 Forbidden blocks.
 - **Smart Scraper**: Extracts clean text using `BeautifulSoup` and `httpx`, aggressively bounded to protect context windows.
 - **State Machine Architecture**: Managed via Pydantic to track visited URLs, prevent duplicate actions, and break infinite agent "death loops".
 
-## Setup
+## Setup:
 1. Create and activate a virtual environment:
    `python3 -m venv venv`
    `source venv/bin/activate`
@@ -14,12 +14,12 @@ A Python-based, locally hosted AI research agent that autonomously plans, search
    `pip install -r requirements.txt`
 3. Ensure Ollama is running with the required model locally.
 
-## Usage
+## Usage:
 ```bash
 python3 engine.py
 ```
 
-System Architecture
+## System Architecture:
 
                         [ User Request ]
                               │
