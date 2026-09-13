@@ -1,32 +1,59 @@
-A Python-based, locally hosted AI research agent that autonomously plans, searches, scrapes, and synthesizes web data. 
+# Research Agent
 
-## Features:
-- **Local AI Engine**: Powered by `qwen2.5-coder:14b` via Ollama for private, zero-cost reasoning.
-- **Autonomous Web Research**: Connects to the Wikipedia REST API with compliant bot headers to bypass 403 Forbidden blocks.
-- **Smart Scraper**: Extracts clean text using `BeautifulSoup` and `httpx`, aggressively bounded to protect context windows.
-- **State Machine Architecture**: Managed via Pydantic to track visited URLs, prevent duplicate actions, and break infinite agent "death loops".
+A locally hosted, multi-agent AI research assistant built on LangGraph. It plans, searches Wikipedia, scrapes and verifies the results, and saves a synthesized report to disk — all running against a local Ollama model, with no cloud API calls.
 
-## Setup:
-1. Create and activate a virtual environment:
-   `python3 -m venv venv`
-   `source venv/bin/activate`
-2. Install dependencies:
-   `pip install -r requirements.txt`
-3. Ensure Ollama is running with the required model locally.
+## Features
 
-## Usage:
+- **Local AI engine** — runs entirely through [Ollama](https://ollama.com), so reasoning is private and has no per-token cost. Defaults to `qwen3:8b`; configurable via `.env`.
+- **Autonomous web research** — searches Wikipedia's API with a policy-compliant identity header, falling back through full-text search, title-prefix matching, and query simplification if an exact phrase comes up empty.
+- **Resilient by design** — a hard, code-level circuit breaker halts the workflow after repeated consecutive search failures, rather than relying on the model to notice and stop on its own.
+- **Fact-checked output** — a dedicated Verifier agent cross-checks scraped data against your original question before anything gets written to disk.
+- **Multi-turn memory** — conversation history persists across turns within a session via LangGraph's checkpointer, so follow-up questions have context from earlier in the same run.
+
+## Setup
+
+1. **Create and activate a virtual environment**
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+2. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. **Start Ollama and pull a model**
+   ```bash
+   ollama pull qwen3:8b
+   ```
+4. **Configure your `.env`**
+
+   | Variable | Purpose | Example |
+   |---|---|---|
+   | `OLLAMA_MODEL` | Local model to use for all agents | `qwen3:8b` |
+   | `OLLAMA_BASE_URL` | Where Ollama is running | `http://localhost:11434` |
+   | `USER_AGENT` | Identity sent to Wikipedia and scraped sites — **must include real contact info** or requests get a 403 | `ResearchAgentBot/1.0 (you@example.com)` |
+   | `MAX_ROUTING_STEPS` | Recursion limit — max Supervisor↔worker handoffs before a run aborts | `20` |
+   | `SCRAPE_CHAR_LIMIT` | Max characters kept per scraped page | `10000` |
+
+   Keep `.env` out of version control (see `.gitignore`) — it's meant to hold your personal contact info, not something to publish.
+
+## Usage
+
 ```bash
-python3 engine.py
+python3 main.py
 ```
 
-## System Architecture:
+Type your research question at the `[You]:` prompt. Type `exit` or `quit` to shut down.
 
+## Architecture
+
+```
                         [ User Request ]
                               │
                               ▼
                  +--------------------------+
                  |                          |
-                 |     Supervisor Agent     | 
+                 |     Supervisor Agent     |
                  |  (Orchestrator/Router)   |
                  |                          |
                  +--------------------------+
@@ -39,9 +66,10 @@ python3 engine.py
        |   Agent    |   |   Agent    |   |   Agent    |
        |            |   |            |   |            |
        +------------+   +------------+   +------------+
-         [Tools:]         [Tools:]         [Tools:]
-         - Search         - Evaluate       - Write File
-         - Scrape         - Cross-Check    - Log State
+         [Tools:]         [Checks:]        [Tools:]
+         - Search         - Cross-check    - Write file
+         - Scrape           vs. objective
+
                   \           │            /
                    \          │           /
                     ▼         ▼          ▼
@@ -55,70 +83,49 @@ python3 engine.py
                               ▼
                    [ Supervisor Decision ]
                   (Route to Agent or FINISH)
-      
-## Execution Sequence
+```
 
-To prevent the AI from confusing itself (hallucinations), LangGraph uses a strict turn-based system.
-Here is the sequence of events when you trigger a new research objective:
+Every worker hands control back to the Supervisor after finishing — the Supervisor is the only node that decides what happens next, based on a Pydantic-constrained structured output (`next_agent` + `instructions`). Everything else in the graph (messages, extracted data, verification status) lives in a shared `TypedDict` state, not a Pydantic model — Pydantic is only used to force the Supervisor's and Researcher's *decisions* into valid, parseable JSON.
 
-### Step 1: State Initialization:
+## Execution sequence
 
-You submit a prompt, LangGraph initialize a **Shared Graph State** and appends your prompt to the message history.
+1. **State initialization** — your prompt is added to the shared message history. Per-turn scratch fields (`extracted_data`, `verification_status`, `search_failures`) reset; the message history itself persists across turns in the same session.
 
-### Step 2: Supervisor Triage (The Guardrail):
+2. **Supervisor triage** — the Supervisor reads the current state and, constrained by a Pydantic schema, outputs exactly two fields: `next_agent` (who acts next) and `instructions` (what they should do). On a fresh question with no data yet, it routes to the **Researcher**.
 
-The Supervisor Agent wakes up and reads the state. Because we force a strict "with_structured_output" Pydantic guardrail, the LLM is physically forced to output a JSON object containing only 2 things:
+3. **Researcher turn** — the Researcher follows the Supervisor's instructions, using `execute_web_search` and `scrape_and_extract`. If a search fails (a 403, a timeout, or genuinely no results), the tool itself already tried several fallback strategies before giving up, and reports back *why* it failed rather than failing silently. Three consecutive failures trip the circuit breaker and the graph ends immediately, regardless of what the Supervisor would otherwise decide. On success, findings are appended to the shared state and control returns to the Supervisor.
 
-1. next_agent (Who to call)
-2. instruction (What they need to do)
+4. **Verifier turn** — once data exists, the Supervisor routes to the Verifier, which checks the scraped data against your original objective in isolation (it has no visibility into how the Researcher got there). It writes either `PASSED: ...` or `FAILED: ...` to the state. A `FAILED` result sends the Supervisor back to the Researcher for another attempt.
 
-It recognizes it needs data, so it routes execution to the **Research Agent**.
+5. **Memory turn** — once verification passes, the Supervisor routes to the Memory agent, which formats the verified findings into a report and writes it to disk with the `save_report` tool.
 
-### Step 3: Execution & Middleware (Researcher Turn):
+6. **Termination** — with the report saved and verification passed, the Supervisor outputs `FINISH`, LangGraph routes to `END`, and the run completes.
 
-Control shits to the Researcher Agent.
-
-- It receives the specific instructions from the Supervisor.
-- It uses the `execute_web_search` and `scrape_and_extract` tools.
-- Middleware kicks in here: if a tool fails (403 Forbidden error or timeout), your middleware catches it, intercept the error, and forces a retry or sanitizes the output before the LLM sees it.
-- Once the data is scraped, the Researcher writes its findings back to the *Shared Graph State* and returns control to the Supervisor.
-
-### Step 4: The Evaluation Check (Verifier Turn):
-
-The Supervisor activates again, sees the new data in the state, then decides it needs fact checking. It routes control to the Verifier Agent.
-
-- The Verifier runs in an isolated context (it doesn't care how hard the Researcher worked).
-- It cross-references the scraped data against your original objective.
-- If the data is garbage, the verifier writes "Failed: Missing NPU specs" to the state. The Supervisor would then route back to the Researcher to try again.
-- If the state is good, the Verifier writes "Passed" to the state and hands control back.
-
-### Step 5: Persistence (Memory Turn):
-
-The Supervisor sees the "Passed" flag. before finishing, it routes to the Memory Agent. The Memory Agent uses its file-writing tools to save the final report to your local disk and logs any specific constraints you mentioned for future runs. It updates the state and hands control back.
-
-### Step 6: Graph Termination:
-
-The Supervisor evaluate the state one last time. Seeing that the research is done, verified, and saved, it's output the command "FINISH". LangGraph routes the workflow to the "END" node, effectively shutting down the loop and returning the final compiled response to you.
-
-
-## Folder Structure:
+## Folder structure
 
 ```
 research-agent/
-├── .env                 # Environment variables (Ollama URL, model names)
-├── requirements.txt     # Python dependencies
-├── state.py             # The Graph State and Pydantic schemas 
+├── .env                  # Environment variables (gitignored — see Setup)
+├── .gitignore
+├── requirements.txt       # Python dependencies
+├── state.py               # Shared graph state (TypedDict) + Pydantic decision schemas
+├── main.py                # Entry point — the CLI loop
+├── graph.py                # Wires agents + state into the compiled LangGraph app
 ├── tools/
 │   ├── __init__.py
-│   ├── search.py        # Web search tool
-│   ├── scraper.py       # Wikipedia scraper tool
-│   └── file_ops.py      # File saving tools for the Memory agent
-├── agents/
-│   ├── __init__.py
-│   ├── supervisor.py    # The brain: routes tasks using structured output
-│   ├── researcher.py    # Worker: executes the search and scrape tools
-│   ├── verifier.py      # Worker: fact-checks the data
-│   └── memory.py        # Worker: saves the final report
-├── graph.py             # Wires the agents and state together into a LangGraph
-└── main.py              # The entry point to run your prompt
+│   ├── search.py          # Wikipedia search tool (with fallback strategies)
+│   ├── scraper.py         # Generic URL text-extraction tool
+│   └── file_ops.py        # File-saving tool used by the Memory agent
+└── agents/
+    ├── __init__.py
+    ├── supervisor.py      # Router — decides which agent acts next
+    ├── researcher.py       # Executes search + scrape tools
+    ├── verifier.py          # Fact-checks extracted data against the objective
+    └── memory.py            # Formats and saves the final report
 ```
+
+## Notes & limitations
+
+- Research is currently limited to Wikipedia — good for grounded, encyclopedic facts, less useful for anything requiring very recent news or non-encyclopedic sources.
+- Everything runs on whatever local model you configure; smaller models may occasionally ignore the Supervisor's routing instructions, which is exactly what the circuit breaker in `graph.py` is there to catch.
+- `MemorySaver` (LangGraph's in-memory checkpointer) is used by default, so conversation history resets when the process restarts. Swap in `SqliteSaver` or `PostgresSaver` if you need it to survive restarts.
