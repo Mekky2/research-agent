@@ -1,7 +1,7 @@
 A Python-based, locally hosted AI research agent that autonomously plans, searches, scrapes, and synthesizes web data. 
 
 ## Features:
-- **Local AI Engine**: Powered by `qwen2.5-coder:3b` via Ollama for private, zero-cost reasoning.
+- **Local AI Engine**: Powered by `qwen2.5-coder:14b` via Ollama for private, zero-cost reasoning.
 - **Autonomous Web Research**: Connects to the Wikipedia REST API with compliant bot headers to bypass 403 Forbidden blocks.
 - **Smart Scraper**: Extracts clean text using `BeautifulSoup` and `httpx`, aggressively bounded to protect context windows.
 - **State Machine Architecture**: Managed via Pydantic to track visited URLs, prevent duplicate actions, and break infinite agent "death loops".
