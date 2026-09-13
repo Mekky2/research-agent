@@ -1,4 +1,41 @@
-venv/
-__pycache__/
-*.pyc
+# Environment / secrets
 .env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.Python
+build/
+dist/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# This project's own output
+# file_ops.py's save_report() defaults to writing here
+final_report.txt
+
+# LangChain / LangGraph local artifacts
+.langgraph_api/
+.langsmith/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
