@@ -3,8 +3,23 @@ import httpx
 import time
 import urllib.parse
 
+import os
+from dotenv import load_dotenv
+
+load_dotenv()  # explicit, not relying on some other module importing first
+
 WIKI_API = "https://en.wikipedia.org/w/api.php"
-HEADERS = {"User-Agent": "LocalResearchAgent/1.0 (local-dev)"}
+
+# Wikimedia's User-Agent policy: a missing, empty, or generic User-Agent gets
+# a hard 403 from their servers, regardless of the request being otherwise
+# valid. https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy
+# The format they ask for is "AppName/Version (contact URL or email)".
+# Reads the same USER_AGENT your .env already defines for the scraper --
+# one identity for both Wikipedia-facing tools. The fallback below is just a
+# safety net if USER_AGENT is ever unset; put your real contact in .env
+# rather than editing this file, since it's the one likely to end up in git.
+_DEFAULT_UA = "ResearchAgentBot/1.0 (set USER_AGENT in your .env)"
+HEADERS = {"User-Agent": os.getenv("USER_AGENT", _DEFAULT_UA)}
 
 # Generic words that help a human phrase a query but hurt it here: they
 # rarely appear verbatim on the target article, and stacking them onto an
