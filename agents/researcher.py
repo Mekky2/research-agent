@@ -5,10 +5,12 @@ from pydantic import BaseModel, Field
 from tools.search import execute_web_search
 from tools.scraper import scrape_and_extract
 
+# 1. The Pydantic Guardrail
 class ResearcherAction(BaseModel):
-    action: str = Field(description="The tool to use. MUST be either 'search' or 'scrape'.")
-    argument: str = Field(description="The input for the tool. For 'search', provide a short keyword query. For 'scrape', provide a URL.")
+    action: str = Field(description="The tool to use. 'search' to find a topic, 'scrape' to read a specific URL.")
+    argument: str = Field(description="A CONCISE 1-3 WORD KEYWORD for search, or a URL for scrape.")
 
+# 2. Initialize LLM
 llm = ChatOllama(
     model=os.getenv("OLLAMA_MODEL", "qwen2.5-coder:14b"),
     temperature=0.0 
@@ -20,11 +22,8 @@ def run_researcher(state: dict) -> dict:
     print("\n[Researcher] Searching and extracting data...")
     
     sys_msg = SystemMessage(
-        content="You are a data retrieval agent.\n"
-        "CRITICAL RULES:\n"
-        "1. Look at the Supervisor's instructions. If the Supervisor gives you a URL, you MUST set action to 'scrape' and use that exact URL.\n"
-        "2. If there is NO URL in the Supervisor's instructions, set action to 'search' and provide a CONCISE 1-3 WORD KEYWORD (e.g., 'Arrow Lake').\n"
-        "Respond ONLY with the required JSON structured data."
+        content="You are a data retrieval agent. Your goal is to find facts.\n"
+        "Set action to 'search' and provide a CONCISE 1-3 WORD KEYWORD."
     )
     
     messages = [sys_msg] + list(state["messages"])
@@ -40,28 +39,32 @@ def run_researcher(state: dict) -> dict:
     
     new_messages = []
     extracted = []
-    tool_result = ""
     
+    # 3. Tool Execution Logic
     if decision.action == 'search':
         print(f"   -> [Tool Execution] Triggering 'search' with query: {decision.argument}")
-        tool_result = execute_web_search.invoke(decision.argument)
-        # CRITICAL FIX: We put the URL in the chat history so the LLM sees it, 
-        # but we DO NOT add it to extracted_data
-        new_messages.append(AIMessage(content=f"Search Result URL: {tool_result}. Next step: I must scrape this URL."))
+        url = execute_web_search.invoke(decision.argument)
         
+        if str(url).startswith("http"):
+            # AUTO-CHAIN: Search worked, immediately scrape to save the Supervisor a turn
+            print(f"   -> [Auto-Chain] Found URL: {url}. Immediately scraping...")
+            scrape_data = scrape_and_extract.invoke(url)
+            extracted.append(str(scrape_data))
+            new_messages.append(AIMessage(content=f"Searched '{decision.argument}', found {url}, and successfully extracted the text data."))
+            print(f"   -> [Tool Output] Scraped {len(str(scrape_data))} characters.")
+        else:
+            # CIRCUIT BREAKER: Search failed, forcefully stop the loop
+            print(f"   -> [Warning] Search failed. Firing circuit breaker to prevent loop.")
+            extracted.append("CRITICAL ERROR: Data does not exist. Workflow aborted.")
+            new_messages.append(AIMessage(content="The search returned absolutely nothing. Stop the workflow. Route to FINISH immediately."))
+            
     elif decision.action == 'scrape':
         print(f"   -> [Tool Execution] Triggering 'scrape' with URL: {decision.argument}")
-        tool_result = scrape_and_extract.invoke(decision.argument)
-        # CRITICAL FIX: Only actual scraped text triggers the 'has_data' state flag
-        extracted.append(str(tool_result))
-        new_messages.append(AIMessage(content=f"I scraped the URL and got the data."))
+        scrape_data = scrape_and_extract.invoke(decision.argument)
+        extracted.append(str(scrape_data))
+        new_messages.append(AIMessage(content=f"Scraped the URL and got the data."))
+        print(f"   -> [Tool Output] Scraped {len(str(scrape_data))} characters.")
         
-    else:
-        print(f"   -> [Warning] Invalid action chosen: {decision.action}")
-        tool_result = "Failed"
-        
-    print(f"   -> [Tool Output] Retrieved {len(str(tool_result))} characters.")
-    
     return {
         "messages": new_messages,
         "extracted_data": state.get("extracted_data", []) + extracted

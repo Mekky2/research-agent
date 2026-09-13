@@ -37,9 +37,8 @@ prompt = ChatPromptTemplate.from_messages([
         "- Has the Researcher extracted data yet?: {has_data}\n"
         "- What is the Verifier's status?: {verification_status}\n\n"
         "CRITICAL RULES:\n"
-        "1. If there is NO 'Search Result URL' in the chat history, instruct the Researcher to SEARCH. NEVER make up, guess, or invent a URL.\n"
-        "2. If there IS a 'Search Result URL' in the chat history, instruct the Researcher to SCRAPE and paste that exact URL into your instructions.\n"
-        "3. If 'has_data' is YES, route to the Verifier.\n\n"
+        "1. If 'has_data' is NO, route to the 'Researcher'. If you see that past searches failed, explicitly instruct the Researcher to try a completely different, broader keyword.\n"
+        "2. If 'has_data' is YES, route to the 'Verifier'.\n\n"
         "Given the conversation above and the current state, who should act next?\n"
         "Respond ONLY with the Pydantic structured output."
     )

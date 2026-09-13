@@ -7,7 +7,6 @@ def execute_web_search(query: str) -> str:
     """Searches Wikipedia's full text for a given query and returns the URL of the top result."""
     print(f"   [Tool: Search] Searching for: {query}")
     
-    # Upgraded to full-text search ('query' + 'srsearch') instead of title-only 'opensearch'
     url = (
         f"https://en.wikipedia.org/w/api.php?"
         f"action=query&list=search&srsearch={urllib.parse.quote(query)}"
@@ -15,14 +14,17 @@ def execute_web_search(query: str) -> str:
     )
     
     try:
-        response = httpx.get(url, timeout=10.0)
-        data = response.json()
+        # WIKIPEDIA FIX: Wikimedia blocks automated requests missing a User-Agent header
+        headers = {"User-Agent": "LocalResearchAgent/1.0 (local-dev)"}
+        response = httpx.get(url, headers=headers, timeout=10.0)
         
-        # Check if the full-text search found any matching pages
+        # This will catch HTTP 403 Forbidden errors if they occur
+        response.raise_for_status() 
+        
+        data = response.json()
         search_results = data.get("query", {}).get("search", [])
         
         if search_results:
-            # Extract the title of the top match and format it into a valid Wikipedia URL
             top_title = search_results[0]["title"]
             formatted_url = f"https://en.wikipedia.org/wiki/{urllib.parse.quote(top_title.replace(' ', '_'))}"
             return formatted_url
