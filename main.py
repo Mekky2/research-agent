@@ -40,7 +40,8 @@ def main():
             "messages": [HumanMessage(content = user_input)],
             "next_agent": "Supervisor", # Always start by assuming the supervisor handles it
             "extracted_data": [],
-            "verification_status": None
+            "verification_status": None,
+            "search_failures": 0
         }
 
         print("\n" + "="*50)

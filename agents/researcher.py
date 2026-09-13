@@ -39,6 +39,7 @@ def run_researcher(state: dict) -> dict:
     
     new_messages = []
     extracted = []
+    search_failures = state.get("search_failures", 0)
     
     # 3. Tool Execution Logic
     if decision.action == 'search':
@@ -52,12 +53,18 @@ def run_researcher(state: dict) -> dict:
             extracted.append(str(scrape_data))
             new_messages.append(AIMessage(content=f"Searched '{decision.argument}', found {url}, and successfully extracted the text data."))
             print(f"   -> [Tool Output] Scraped {len(str(scrape_data))} characters.")
+            search_failures = 0  # reset the streak on a real success
         else:
-            # CIRCUIT BREAKER: Search failed, forcefully stop the loop
-            print(f"   -> [Warning] Search failed. Firing circuit breaker to prevent loop.")
-            extracted.append("CRITICAL ERROR: Data does not exist. Workflow aborted.")
-            new_messages.append(AIMessage(content="The search returned absolutely nothing. Stop the workflow. Route to FINISH immediately."))
-            
+            # `url` here is actually the tool's error/status string (e.g.
+            # "No results found for that query." or "Search failed: ...").
+            # Print it directly instead of a generic message, since that's
+            # the only way to tell "Wikipedia has nothing" apart from
+            # "the request itself failed" (timeout, DNS, HTTP error, etc.).
+            search_failures += 1
+            print(f"   -> [Warning] Search failed ({search_failures}/3 consecutive): {url}")
+            extracted.append(f"CRITICAL ERROR: Search failed for '{decision.argument}': {url}")
+            new_messages.append(AIMessage(content=f"The search failed: {url}. Stop the workflow. Route to FINISH immediately."))
+
     elif decision.action == 'scrape':
         print(f"   -> [Tool Execution] Triggering 'scrape' with URL: {decision.argument}")
         scrape_data = scrape_and_extract.invoke(decision.argument)
@@ -67,5 +74,6 @@ def run_researcher(state: dict) -> dict:
         
     return {
         "messages": new_messages,
-        "extracted_data": state.get("extracted_data", []) + extracted
+        "extracted_data": state.get("extracted_data", []) + extracted,
+        "search_failures": search_failures
     }

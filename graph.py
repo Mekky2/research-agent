@@ -8,8 +8,21 @@ from agents.researcher import run_researcher
 from agents.verifier import run_verifier
 from agents.memory import run_memory
 
+# How many consecutive search failures we tolerate before forcing a stop,
+# regardless of what the Supervisor LLM decides to do next.
+MAX_SEARCH_FAILURES = 3
+
 def route_supervisor(state: ResearchGraphState) -> str:
     """Reads the supervisor's routing decision and maps it to a graph node."""
+
+    # Hard, code-level circuit breaker. The Researcher's messages *tell* the
+    # Supervisor to route to FINISH after a failed search, but that's just a
+    # hint in free text -- the LLM can (and did, in practice) ignore it and
+    # keep retrying the same failing search until recursion_limit crashes the
+    # graph. This check doesn't depend on the model cooperating.
+    if state.get("search_failures", 0) >= MAX_SEARCH_FAILURES:
+        return END
+
     next_node = state.get("next_agent", "FINISH")
 
     # If the supervisor decides the job is done, route to the built-in END node

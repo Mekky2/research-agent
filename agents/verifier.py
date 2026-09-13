@@ -12,9 +12,9 @@ llm = ChatOllama(
 # Create a strict evaluation prompt
 verifier_prompt = ChatPromptTemplate.from_messages([
     ("system",
-     "You are teh Verifier Agent. Evaluate the provided research data against the user's objective\n"
+     "You are the Verifier Agent. Evaluate the provided research data against the user's objective.\n"
      "If the data completely fulfills the objective, respond with exactly 'PASSED: [Brief explanation]'.\n"
-     "If it is missing crucial info, respond with exactly 'FAILED: [What is missing].\n"
+     "If it is missing crucial info, respond with exactly 'FAILED: [What is missing]'.\n"
      "DO NOT hallucinate. Base your judgment entirely on the extracted data provided.\n"
     ),
     ("human", "Objective: {objective}\n\nExtracted Data:\n{extracted_data}")
@@ -30,7 +30,7 @@ def run_verifier(state: dict) -> dict:
     objective = next((m.content for m in state["messages"] if m.type == "human"), "Unknown Objective")
 
     # Compile all the raw scraped data the Researcher saved
-    raw_data = "\n\n".join(state.get("extracted_data",[]))
+    raw_data = "\n\n".join(state.get("extracted_data", []))
 
     if not raw_data:
         response = "FAILED: No data was extracted by the Researcher."
@@ -41,7 +41,10 @@ def run_verifier(state: dict) -> dict:
             # We enforce a context limit here just in case the scrape was massive
             "extracted_data": raw_data[-20000:]
         })
-        response = result.content
+        # .content is normally a str for ChatOllama, but cast defensively since
+        # some providers can return a list of content blocks instead of a bare str,
+        # and .startswith() below would otherwise blow up on that.
+        response = str(result.content)
 
     print(f" -> Verdict: {response}")
 
