@@ -9,7 +9,7 @@ load_dotenv()
 
 # 1. Initialize the local model
 llm = ChatOllama(
-    model=os.getenv("OLLAMA_MODEL", "qwen2.5-coder:14b"),
+    model=os.getenv("OLLAMA_MODEL", "qwen3:8b"),
     temperature=0.0,
     base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 )

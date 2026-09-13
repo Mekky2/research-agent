@@ -6,7 +6,9 @@ def main():
     print("Research Agent Initialized.\n")
     print("Type 'exit' or 'quit' to shut down the system.\n")
 
-    # LangGraph uses a configuration thread to track the graph's execution state
+    # LangGraph uses a configuration thread to track the graph's execution state.
+    # Now that graph.py compiles `app` with a checkpointer, this thread_id is what
+    # actually ties every turn below back to the same persisted conversation.
     # Add recursion_limit to act as a circuit breaker
     config = {
         "configurable": {"thread_id": str(uuid.uuid4())},
@@ -23,7 +25,17 @@ def main():
         if not user_input.strip():
             continue
 
-        # 1. Initialize the starting state dictionary
+        # 1. Initialize this turn's state dictionary.
+        #
+        # With the checkpointer in place:
+        #   - "messages" is Annotated with operator.add, so this turn's new
+        #     HumanMessage gets appended to the full history LangGraph already
+        #     has saved for this thread_id -- you get real conversation memory
+        #     for free, no extra code needed here.
+        #   - "extracted_data" and "verification_status" have no reducer, so
+        #     passing fresh values here intentionally resets them each turn.
+        #     That's what you want: last turn's scraped data/verdict shouldn't
+        #     leak into a new question's research task.
         initial_state = {
             "messages": [HumanMessage(content = user_input)],
             "next_agent": "Supervisor", # Always start by assuming the supervisor handles it

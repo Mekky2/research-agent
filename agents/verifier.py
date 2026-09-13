@@ -5,7 +5,7 @@ from langchain_core.messages import AIMessage
 
 # Initialize the auditor LLM with absolute zero creativity
 llm = ChatOllama(
-    model = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:14b"),
+    model = os.getenv("OLLAMA_MODEL", "qwen3:8b"),
     temperature = 0.0
 )
 

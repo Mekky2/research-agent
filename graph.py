@@ -1,4 +1,5 @@
 from langgraph.graph import StateGraph, START, END
+from langgraph.checkpoint.memory import MemorySaver
 from state import ResearchGraphState
 
 # Import our agent nodes
@@ -17,7 +18,7 @@ def route_supervisor(state: ResearchGraphState) -> str:
 
     return next_node
 
-# 1. Initialize the graph wwith our custom shared state
+# 1. Initialize the graph with our custom shared state
 builder = StateGraph(ResearchGraphState)
 
 # 2. Add all the agent nodes
@@ -47,6 +48,13 @@ builder.add_edge("Researcher", "Supervisor")
 builder.add_edge("Verifier", "Supervisor")
 builder.add_edge("Memory", "Supervisor")
 
-# 4. Compile the graph into a runnable application
-
-app = builder.compile()
+# 4. Compile the graph into a runnable application.
+#
+# A checkpointer is what makes `thread_id` in main.py's config actually do
+# something. Without one, LangGraph has nowhere to persist state between
+# invocations, so every call to app.stream() starts from a blank slate
+# regardless of what thread_id you pass. MemorySaver keeps checkpoints
+# in-process (lost on restart) -- swap in SqliteSaver/PostgresSaver for
+# anything that needs to survive a restart.
+checkpointer = MemorySaver()
+app = builder.compile(checkpointer=checkpointer)
